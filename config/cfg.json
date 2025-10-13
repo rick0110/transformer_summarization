@@ -1,0 +1,26 @@
+{
+  "model": {
+    "vocab_size": 30000,
+    "d_model": 512,
+    "n_heads": 8,
+    "dim_ff": 2048,
+    "max_len": 256,
+    "padding_idx": 0,
+    "num_layers": 10,
+    "dropout": 0.1,
+    "tie_weights": true
+  },
+  "train": {
+    "batch_size": 8,
+    "epochs": 3,
+    "lr": 5e-05,
+    "max_len": 256,
+    "tb_logdir": "runs/exp1",
+    "log_histograms_every": 1000,
+    "output_dir": "checkpoints"
+  },
+  "paths": {
+    "tokenizer_path": "tokenizadores/vagas_tokenizer_wp.json",
+    "data_path": "data/dataset.json"
+  }
+}
