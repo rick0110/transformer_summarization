@@ -17,14 +17,46 @@ class TextDataset(Dataset):
         self.tokenizer = Tokenizer.from_file(tokenizer_path)
         self.pad_id = self.tokenizer.token_to_id("[PAD]")
         self.examples: List[List[int]] = []
+        # Support both JSON array (single large array) and NDJSON (one JSON object per line).
+        # Use a streaming approach to avoid loading everything into memory.
+        def iter_rows(path: str):
+            with open(path, encoding="utf-8") as f:
+                first = f.readline()
+                if not first:
+                    return
+                first_strip = first.lstrip()
+                # If file starts with '[' it's likely a JSON array
+                if first_strip.startswith("["):
+                    # read the whole file but parse iteratively to support large arrays
+                    # fall back to json.load for well-formed arrays
+                    f.seek(0)
+                    try:
+                        data = json.load(f)
+                        for item in data:
+                            yield item
+                        return
+                    except json.JSONDecodeError:
+                        # if it's too big or malformed, try a tolerant parser: treat as NDJSON
+                        f.seek(0)
+                else:
+                    # first line not starting with '[' => treat as NDJSON
+                    # yield first line if it contains an object
+                    try:
+                        yield json.loads(first)
+                    except Exception:
+                        pass
+                # iterate remaining lines as NDJSON (one JSON object per line)
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except Exception:
+                        # ignore malformed lines
+                        continue
 
-        if data_path.endswith(".json"):
-            with open(data_path, encoding="utf-8") as f:
-                rows = json.load(f)
-        else:
-            raise ValueError("Data must be .json")
-
-        for r in rows:
+        for r in iter_rows(data_path):
             parts = []
             for c in text_columns:
                 v = r.get(c, "")
@@ -88,7 +120,7 @@ def train(
     text_columns: List[str],
     output_dir: str,
     batch_size: int = 16,
-    epochs: int = 3,
+    epochs: int = 30,
     lr: float = 5e-5,
     max_len: int = 512,
     device: Optional[torch.device] = None,
@@ -236,5 +268,4 @@ def train(
         writer.close()
 
     return model
-
 

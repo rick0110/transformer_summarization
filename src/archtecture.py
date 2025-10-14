@@ -101,7 +101,7 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x, attn_mask=None, key_padding_mask=None):
         x2 = self.ln1(x)
-        sa = self.mha(x2, x2, x2, attn_mask=attn_mask, key_padding_mask=key_padding_mask)
+        sa = self.mha(x2, x2, x2, attn_mask=attn_mask)
         x = x + self.dropout(sa)
 
         x2 = self.ln2(x)

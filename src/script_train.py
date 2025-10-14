@@ -20,6 +20,9 @@ def load_cfg(cfg_path: str):
     if cfg_path.endswith(".json"):
         with open(cfg_path, encoding="utf-8") as f:
             data = json.load(f)
+        # If JSON has a top-level 'model' key, flatten it for convenience
+        if isinstance(data, dict) and "model" in data and isinstance(data["model"], dict):
+            data = {**data["model"]}
         return SimpleNamespace(**data)
 
     # try to import as python file
@@ -70,17 +73,51 @@ def main():
     text_columns = parse_text_columns(args.text_cols)
     cfg = load_cfg(args.cfg)
 
+    # If user didn't pass --text-cols, try to get from cfg.text_columns
+    if not text_columns:
+        if hasattr(cfg, "text_columns"):
+            cfg_cols = getattr(cfg, "text_columns")
+            if isinstance(cfg_cols, str):
+                text_columns = parse_text_columns(cfg_cols)
+            elif isinstance(cfg_cols, (list, tuple)):
+                text_columns = [str(c).strip() for c in cfg_cols if c]
+        # still empty -> fail fast with actionable message
+        if not text_columns:
+            raise RuntimeError(
+                "text columns not specified. Pass --text-cols 'col1,col2' or add 'text_columns' in the cfg file"
+            )
+
     # ensure tokenizer exists
     if not os.path.exists(args.tokenizer):
         raise FileNotFoundError(args.tokenizer)
 
-    # fill minimal cfg fields if missing
-    if not hasattr(cfg, "vocab_size"):
-        cfg.vocab_size = Tokenizer.from_file(args.tokenizer).get_vocab_size()
-    if not hasattr(cfg, "max_len"):
+    # fill required cfg fields (with sensible defaults if missing)
+    tok = Tokenizer.from_file(args.tokenizer)
+    if not hasattr(cfg, "vocab_size") or not cfg.vocab_size:
+        cfg.vocab_size = tok.get_vocab_size()
+    if not hasattr(cfg, "max_len") or not cfg.max_len:
         cfg.max_len = args.max_len
     if not hasattr(cfg, "padding_idx"):
-        cfg.padding_idx = Tokenizer.from_file(args.tokenizer).token_to_id("[PAD]")
+        cfg.padding_idx = tok.token_to_id("[PAD]")
+    # architecture essentials
+    if not hasattr(cfg, "d_model"):
+        cfg.d_model = 256
+    if not hasattr(cfg, "n_heads"):
+        cfg.n_heads = 8
+    if not hasattr(cfg, "dim_ff"):
+        cfg.dim_ff = max(4 * cfg.d_model, 256)
+    if not hasattr(cfg, "num_layers"):
+        cfg.num_layers = 6
+    if not hasattr(cfg, "dropout"):
+        cfg.dropout = 0.1
+    if not hasattr(cfg, "tie_weights"):
+        cfg.tie_weights = False
+
+    # Determine TensorBoard logdir: CLI overrides cfg.tb_logdir
+    tb_logdir = args.tb_logdir if args.tb_logdir else getattr(cfg, "tb_logdir", None)
+    if tb_logdir:
+        tb_logdir = os.path.abspath(os.path.expanduser(tb_logdir))
+        os.makedirs(tb_logdir, exist_ok=True)
 
     train(
         cfg,
@@ -91,8 +128,8 @@ def main():
         batch_size=args.batch_size,
         epochs=args.epochs,
         lr=args.lr,
-        max_len=args.max_len,
-        tb_log_dir=args.tb_logdir,
+        max_len=cfg.max_len,
+        tb_log_dir=tb_logdir,
         resume_from=args.resume,
     )
 

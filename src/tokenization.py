@@ -15,25 +15,31 @@ def train_and_save_tokenizer(
     output_path: str,
     vocab_size: int,
     model_type: str = 'wordpiece',
-    special_tokens: list[str] = ["[UNK]", "[PAD]", "[SOS]", "[EOS]"],
-    verbose: bool = True
+    special_tokens: list[str] | None = None,
+    verbose: bool = True,
+    max_examples: int | None = None,  # <- novo parâmetro
 ):
+    if special_tokens is None:
+        special_tokens = ["[UNK]", "[PAD]", "[SOS]", "[EOS]"]
+
+    if not text_columns:
+        raise ValueError("text_columns não pode ser vazio. Passe a lista de colunas de texto do dataset.")
+
     if verbose:
         print(f"Iniciando o treinamento do tokenizer com o modelo '{model_type}'...")
-    if verbose:
-        print(f"Carregando dataset de '{dataset_path}'...")
-    elif dataset_path.endswith('.json'):
-        dataset = load_dataset('json', data_files={'train': dataset_path})
-    else:
-        raise ValueError("Formato de arquivo não suportado. Use .csv ou .json")
-    
-    if model_type.lower() == 'wordpiece':
+        print(f"Carregando dataset de '{dataset_path}' (streaming para reduzir uso de memória)...")
+
+    # usar streaming=True para não carregar todo o dataset na memória
+    dataset = load_dataset('json', data_files={'train': dataset_path}, streaming=True)
+
+    model_type_l = model_type.lower()
+    if model_type_l == 'wordpiece':
         model = WordPiece(unk_token="[UNK]")
         trainer = WordPieceTrainer(vocab_size=vocab_size, special_tokens=special_tokens)
-    elif model_type.lower() == 'bpe':
+    elif model_type_l == 'bpe':
         model = BPE(unk_token="[UNK]")
         trainer = BpeTrainer(vocab_size=vocab_size, special_tokens=special_tokens)
-    elif model_type.lower() == 'unigram':
+    elif model_type_l == 'unigram':
         model = Unigram()
         trainer = UnigramTrainer(vocab_size=vocab_size, unk_token="[UNK]", special_tokens=special_tokens)
     else:
@@ -42,23 +48,38 @@ def train_and_save_tokenizer(
     tokenizer = Tokenizer(model)
     tokenizer.pre_tokenizer = Whitespace()
 
-    def get_training_corpus():
-        for i in range(len(dataset['train'])):
-            for col in text_columns:
-                text = dataset['train'][i][col]
-                if text:
-                    yield text
+    def get_training_corpus(dataset=dataset, text_columns=text_columns, max_examples_local: int | None = None):
+        count = 0
+        for example in dataset['train']:
+            if isinstance(example, dict):
+                for col in text_columns:
+                    text = example.get(col)
+                    if text:
+                        yield str(text)
+            else:
+                for col in text_columns:
+                    text = getattr(example, col, None)
+                    if text:
+                        yield str(text)
+            count += 1
+            if max_examples_local is not None and count >= max_examples_local:
+                break
 
     if verbose:
         print(f"Treinando o tokenizer com um vocabulário de {vocab_size} tokens. Isso pode levar um tempo...")
-    tokenizer.train_from_iterator(get_training_corpus(), trainer)
+
+    try:
+        tokenizer.train_from_iterator(get_training_corpus(max_examples_local=max_examples), trainer)
+    except Exception as e:
+        raise RuntimeError(f"Falha ao treinar o tokenizer: {e}") from e
+
     if verbose:
         print("Treinamento concluído.")
 
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-        
+
     tokenizer.save(output_path)
     if verbose:
         print(f"Tokenizer salvo com sucesso em: '{output_path}'")
