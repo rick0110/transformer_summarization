@@ -25,28 +25,27 @@ def load_cfg(cfg_path: str):
 
 def main():
     p = argparse.ArgumentParser(description="Train transformer model (wrapper)")
-    p.add_argument()
-
-    args = p.parse_args("cfg", help="Path to cfg file (.json) for training")
+    p.add_argument("--cfg", type=str, required=True, help="Path to cfg file (.json) for training")
+    args = p.parse_args()
 
     cfg = load_cfg(args.cfg)
 
     train(
         cfg,
-        dataset_path=args.data_path,
-        tokenizer_path=args.tokenizer_path,
-        text_columns=[col.strip() for col in cfg.text_columns.split(",")],
+        dataset_path=cfg.data_path,
+        tokenizer_path=cfg.tokenizer_path,
+        text_columns=[col.strip() for col in cfg.text_column.split(",")],
         output_dir=cfg.output_dir,
         batch_size=cfg.batch_size,
         epochs=cfg.epochs,
         lr=cfg.lr,
         max_len=cfg.max_len,
         tb_log_dir=cfg.tb_logdir,
-        resume_from=cfg.resume_from,
-        device=cfg.getattr('device', None),
-
-
+        device=getattr(cfg, "device", None),  # <- aqui também tinha um errinho
     )
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

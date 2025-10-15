@@ -5,6 +5,7 @@ from tokenizers import Tokenizer
 from tokenizers.models import BPE, WordPiece, Unigram
 from tokenizers.trainers import BpeTrainer, WordPieceTrainer, UnigramTrainer
 from tokenizers.pre_tokenizers import Whitespace
+from tokenizers.normalizers import Sequence, NFD, Lowercase, StripAccents
 import torch
 import torch.nn as nn
 import math
@@ -27,10 +28,11 @@ def train_and_save_tokenizer(
 
     if verbose:
         print(f"Iniciando o treinamento do tokenizer com o modelo '{model_type}'...")
-        print(f"Carregando dataset de '{dataset_path}' (streaming para reduzir uso de memória)...")
+        print(f"Carregando dataset de '{dataset_path}' (carregando todos os dados em memória)...")
 
-    # usar streaming=True para não carregar todo o dataset na memória
-    dataset = load_dataset('json', data_files={'train': dataset_path}, streaming=True)
+    # carregar todo o dataset na memória (modo simples)
+    ds = load_dataset('json', data_files={'train': dataset_path})
+    dataset = ds['train']
 
     model_type_l = model_type.lower()
     if model_type_l == 'wordpiece':
@@ -46,35 +48,44 @@ def train_and_save_tokenizer(
         raise ValueError("model_type deve ser 'wordpiece', 'bpe' ou 'unigram'")
 
     tokenizer = Tokenizer(model)
+    # normalização simples: decompor, lowercase, remover acentos
+    tokenizer.normalizer = Sequence([NFD(), Lowercase(), StripAccents()])
     tokenizer.pre_tokenizer = Whitespace()
 
-    def get_training_corpus(dataset=dataset, text_columns=text_columns, max_examples_local: int | None = None):
-        count = 0
-        for example in dataset['train']:
-            if isinstance(example, dict):
-                for col in text_columns:
-                    text = example.get(col)
-                    if text:
-                        yield str(text)
-            else:
-                for col in text_columns:
-                    text = getattr(example, col, None)
-                    if text:
-                        yield str(text)
-            count += 1
-            if max_examples_local is not None and count >= max_examples_local:
-                break
+    # construir lista simples de textos para treino
+    training_texts: list[str] = []
+    count = 0
+    for example in dataset:
+        if isinstance(example, dict):
+            for col in text_columns:
+                text = example.get(col)
+                if text:
+                    training_texts.append(str(text))
+        else:
+            for col in text_columns:
+                text = getattr(example, col, None)
+                if text:
+                    training_texts.append(str(text))
+        count += 1
+        if max_examples is not None and count >= max_examples:
+            break
 
     if verbose:
         print(f"Treinando o tokenizer com um vocabulário de {vocab_size} tokens. Isso pode levar um tempo...")
 
     try:
-        tokenizer.train_from_iterator(get_training_corpus(max_examples_local=max_examples), trainer)
+        # passar a lista inteira (ou um iterador) para o trainer
+        tokenizer.train_from_iterator(iter(training_texts), trainer)
     except Exception as e:
         raise RuntimeError(f"Falha ao treinar o tokenizer: {e}") from e
 
     if verbose:
         print("Treinamento concluído.")
+        print(f"Vocab size solicitado: {vocab_size}")
+        try:
+            print(f"Vocab size real gerado: {tokenizer.get_vocab_size()}")
+        except Exception:
+            pass
 
     output_dir = os.path.dirname(output_path)
     if output_dir:
@@ -83,6 +94,27 @@ def train_and_save_tokenizer(
     tokenizer.save(output_path)
     if verbose:
         print(f"Tokenizer salvo com sucesso em: '{output_path}'")
+
+    # mostrar amostra de tokens e tokenização de exemplo
+    if verbose:
+        try:
+            vocab = tokenizer.get_vocab()
+            inv = sorted(vocab.items(), key=lambda x: x[1])
+            sample_tokens = [t for t, _ in inv[:50]]
+            print("Amostra dos primeiros tokens:", sample_tokens)
+        except Exception:
+            pass
+
+        try:
+            examples = training_texts[:3]
+            for s in examples:
+                enc = tokenizer.encode(s)
+                print(f"Texto: {s}")
+                print(f"Tokens: {enc.tokens}")
+        except Exception:
+            pass
+
+    return tokenizer
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, max_len: int = 5000):
