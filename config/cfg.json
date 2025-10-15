@@ -1,21 +1,18 @@
-{
-  "model": {
-    "vocab_size": 1508,
-    "d_model": 256,
-    "n_heads": 16,
-    "dim_ff": 256,
+{  "vocab_size": 1508,
+    "d_model": 512,
+    "n_heads": 8,
+    "dim_ff": 1024,
     "max_len": 50,
     "padding_idx": 0,
-    "num_layers": 5,
+    "num_layers": 8,
     "dropout": 0.1,
     "tie_weights": true,
     "batch_size": 16,
-    "epochs": 30,
+    "epochs": 100,
     "lr": 5e-05,
     "tb_logdir": "runs/exp1",
     "log_histograms_every": 1000,
     "output_dir": "checkpoints",
     "tokenizer_path": "./../data/hh-rlhf_tokenizer.json",
     "data_path": "./../data/hh-rlhf.json"
-  }
 }
